@@ -55,6 +55,22 @@ jobs:
           Write-Host "Running: $cmd"
           Invoke-Expression $cmd
 
+      - name: Show build errors
+        if: failure()
+        shell: pwsh
+        run: |
+          $buildDir = "${{ runner.temp }}\quantlib-build\QuantLib-${{ env.QL_VERSION }}\build"
+          Write-Host "==> Searching for build error logs..."
+          if (Test-Path $buildDir) {
+            foreach ($logName in @("build-library.log", "build-testsuite.log")) {
+              $logPath = Join-Path $buildDir $logName
+              if (Test-Path $logPath) {
+                Write-Host "`n==> $logName (last 100 lines):"
+                Get-Content $logPath -Tail 100 | Write-Host
+              }
+            }
+          }
+
       - name: Verify zip
         shell: pwsh
         run: |
