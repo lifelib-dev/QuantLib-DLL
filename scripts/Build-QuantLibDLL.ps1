@@ -23,9 +23,11 @@
 
 .PARAMETER InstallDir
     Where to install QuantLib (cmake --install prefix).
+    Default: install/ in the repository root.
 
 .PARAMETER TempDir
-    Temporary directory for source downloads and build artifacts.
+    Working directory for source downloads and build artifacts.
+    Default: build/ in the repository root so you can inspect patched sources.
 
 .PARAMETER Jobs
     Number of parallel build jobs. 0 = auto-detect (default).
@@ -50,8 +52,8 @@
 param(
     [string]$QuantLibVersion = "1.41",
     [string]$BoostVersion    = "1.87.0",
-    [string]$InstallDir      = "C:\quantlib-build\install",
-    [string]$TempDir         = "$env:TEMP\quantlib-dll-build",
+    [string]$InstallDir      = (Join-Path (Split-Path $PSScriptRoot) "install"),
+    [string]$TempDir         = (Join-Path (Split-Path $PSScriptRoot) "build"),
     [int]$Jobs               = 0,
     [switch]$BuildTests,
     [switch]$PackageZip,
