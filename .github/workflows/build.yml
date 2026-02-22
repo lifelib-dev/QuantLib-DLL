@@ -1,0 +1,113 @@
+name: Build QuantLib DLL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      quantlib_version:
+        description: "QuantLib version"
+        required: true
+        default: "1.41"
+      boost_version:
+        description: "Boost version"
+        required: true
+        default: "1.87.0"
+      build_tests:
+        description: "Build and include QuantLib test suite"
+        type: boolean
+        default: false
+      create_release:
+        description: "Create a GitHub Release with the zip asset"
+        type: boolean
+        default: true
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: "Build QuantLib ${{ inputs.quantlib_version || '1.41' }} DLL"
+    runs-on: windows-2022
+
+    env:
+      QL_VERSION: ${{ inputs.quantlib_version || '1.41' }}
+      BOOST_VERSION: ${{ inputs.boost_version || '1.87.0' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build QuantLib DLL
+        shell: pwsh
+        run: |
+          $buildTestsFlag = if ("${{ inputs.build_tests }}" -eq "true") { "-BuildTests" } else { "" }
+          $cmd = "scripts/Build-QuantLibDLL.ps1" +
+            " -QuantLibVersion $env:QL_VERSION" +
+            " -BoostVersion $env:BOOST_VERSION" +
+            " -InstallDir ${{ runner.temp }}\quantlib-install" +
+            " -TempDir ${{ runner.temp }}\quantlib-build" +
+            " -PackageZip" +
+            " -ZipOutputDir ${{ github.workspace }}" +
+            " $buildTestsFlag"
+          Write-Host "Running: $cmd"
+          Invoke-Expression $cmd
+
+      - name: Verify zip
+        shell: pwsh
+        run: |
+          $zip = "QuantLib-${{ env.QL_VERSION }}-x64-dll.zip"
+          $size = [math]::Round((Get-Item $zip).Length / 1MB, 1)
+          Write-Host "==> $zip ($size MB)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: "QuantLib-${{ env.QL_VERSION }}-x64-dll"
+          path: "QuantLib-${{ env.QL_VERSION }}-x64-dll.zip"
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      inputs.create_release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    env:
+      QL_VERSION: ${{ inputs.quantlib_version || '1.41' }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: "QuantLib-${{ env.QL_VERSION }}-x64-dll"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ env.QL_VERSION }}"
+          name: "QuantLib ${{ env.QL_VERSION }} (Windows x64 DLL)"
+          body: |
+            Pre-built QuantLib ${{ env.QL_VERSION }} as a Windows x64 DLL.
+
+            **Contents of `QuantLib-${{ env.QL_VERSION }}-x64-dll.zip`:**
+            - `QuantLib-${{ env.QL_VERSION }}/bin/QuantLib-x64-mt.dll` — Runtime DLL
+            - `QuantLib-${{ env.QL_VERSION }}/lib/QuantLib-x64-mt.lib` — Import library
+            - `QuantLib-${{ env.QL_VERSION }}/include/ql/` — QuantLib headers (patched for DLL)
+            - `boost_${{ inputs.boost_version }}/` — Boost ${{ inputs.boost_version }} headers
+
+            **Build details:**
+            - Visual Studio 2022 (MSVC)
+            - `BUILD_SHARED_LIBS=ON`, `CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON`
+            - MSVC DLL CRT (`/MD`)
+
+            **Usage:**
+            ```powershell
+            Expand-Archive QuantLib-${{ env.QL_VERSION }}-x64-dll.zip -DestinationPath C:\quantlib-deps
+            ```
+          files: "QuantLib-${{ env.QL_VERSION }}-x64-dll.zip"
+          draft: false
+          prerelease: false

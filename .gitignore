@@ -1,0 +1,10 @@
+# Build artifacts
+*.zip
+*.dll
+*.lib
+*.exp
+*.exe
+*.obj
+*.pdb
+build/
+install/
