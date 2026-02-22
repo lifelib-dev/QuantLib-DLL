@@ -34,6 +34,8 @@ Requirements: Visual Studio 2022 (C++ workload), CMake, 7-Zip.
 .\scripts\Build-QuantLibDLL.ps1 -PackageZip
 ```
 
+By default the working directory is `build/` and the install directory is `install/` inside the repo, so you can inspect the patched QuantLib sources at `build\QuantLib-<version>\` after the build.
+
 With custom versions and install location:
 
 ```powershell
