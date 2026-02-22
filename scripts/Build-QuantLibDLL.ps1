@@ -99,7 +99,7 @@ if (-not (Test-Path "$QLSrcDir\CMakeLists.txt")) {
     $QLTarGz = "$TempDir\QuantLib.tar.gz"
     Invoke-WebRequest -Uri $QLUrl -OutFile $QLTarGz -UseBasicParsing
     Write-Host "==> Extracting QuantLib source"
-    tar xzf $QLTarGz -C $TempDir
+    & "$env:SystemRoot\System32\tar.exe" xzf $QLTarGz -C $TempDir
     if ($LASTEXITCODE -ne 0) { throw "tar extraction failed with exit code $LASTEXITCODE" }
 } else {
     Write-Host "==> QuantLib source already present, skipping download"
