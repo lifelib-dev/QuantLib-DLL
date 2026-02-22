@@ -7,6 +7,9 @@
     DLL builds on MSVC, builds with CMake, and optionally packages the output
     as a zip for distribution.
 
+    Use -RunTests to execute the test suite after building. The script validates
+    exit code 0 and "No errors detected" in the output.
+
     Upstream QuantLib blocks DLL builds on MSVC with a FATAL_ERROR. This script
     applies seven patches to enable DLL builds:
       1. cmake/Platform.cmake      - Remove FATAL_ERROR blocking DLL builds
@@ -37,6 +40,9 @@
 .PARAMETER BuildTests
     Also build the QuantLib test suite.
 
+.PARAMETER RunTests
+    Run the QuantLib test suite after building. Implies -BuildTests.
+
 .PARAMETER PackageZip
     Create a distributable zip containing QuantLib DLL + headers + Boost headers.
 
@@ -58,11 +64,15 @@ param(
     [string]$TempDir         = (Join-Path (Split-Path $PSScriptRoot) "build"),
     [int]$Jobs               = 0,
     [switch]$BuildTests,
+    [switch]$RunTests,
     [switch]$PackageZip,
     [string]$ZipOutputDir    = "."
 )
 
 $ErrorActionPreference = "Stop"
+
+# -RunTests implies -BuildTests
+if ($RunTests) { $BuildTests = [switch]::new($true) }
 
 $BoostVersionU = $BoostVersion -replace '\.', '_'
 if ($Jobs -eq 0) {
@@ -299,7 +309,38 @@ if (Test-Path "$InstallDir\bin") {
 }
 
 # ==========================================================================
-# 6. Package zip (optional)
+# 6. Run test suite (optional)
+# ==========================================================================
+if ($RunTests) {
+    Write-Host "==> Running QuantLib test suite"
+    $TestExePath = Get-ChildItem -Recurse "$QLBuildDir\test-suite" -Filter "quantlib-test-suite.exe" |
+                   Where-Object { $_.Directory.Name -eq "Release" } | Select-Object -First 1
+    if (-not $TestExePath) {
+        throw "quantlib-test-suite.exe not found under $QLBuildDir\test-suite"
+    }
+    Write-Host "  Executable: $($TestExePath.FullName)"
+
+    # Add the DLL directory to PATH so the test can find the QuantLib DLL
+    $DllDir = (Get-ChildItem -Recurse $QLBuildDir -Filter "QuantLib*.dll" |
+               Where-Object { $_.Directory.Name -eq "Release" } | Select-Object -First 1).DirectoryName
+    $env:PATH = "$DllDir;$env:PATH"
+    Write-Host "  DLL directory added to PATH: $DllDir"
+
+    $testOutput = & $TestExePath.FullName 2>&1 | Out-String
+    $testExitCode = $LASTEXITCODE
+    Write-Host $testOutput
+
+    if ($testExitCode -ne 0) {
+        throw "quantlib-test-suite.exe exited with code $testExitCode (expected 0)"
+    }
+    if ($testOutput -notmatch '\*\*\* No errors detected') {
+        throw "Test suite output did not contain '*** No errors detected'"
+    }
+    Write-Host "==> Test suite PASSED (exit code 0, no errors detected)"
+}
+
+# ==========================================================================
+# 7. Package zip (optional)
 # ==========================================================================
 if ($PackageZip) {
     Write-Host "==> Packaging distribution zip"
