@@ -10,6 +10,7 @@
     Upstream QuantLib blocks DLL builds on MSVC with a FATAL_ERROR. This script
     applies seven patches to enable DLL builds:
       1. cmake/Platform.cmake      - Remove FATAL_ERROR blocking DLL builds
+                                       and suppress C4251 warnings
       2. ql/CMakeLists.txt          - Add RUNTIME DESTINATION for DLL install
       3. ql/qldefines.hpp.cfg       - Inject QL_EXPORT/QL_IMPORT_ONLY macros
       4. normaldistribution.hpp     - Annotate classes with QL_EXPORT
@@ -115,7 +116,7 @@ $PlatformCmake = "$QLSrcDir\cmake\Platform.cmake"
 $original = Get-Content $PlatformCmake -Raw
 $patched = $original -replace `
     'message\(FATAL_ERROR\s*\r?\n\s*"Shared library \(DLL\) builds for QuantLib on MSVC are not supported"\)', `
-    '# Patched: DLL build enabled (FATAL_ERROR removed by QuantLib-DLL)'
+    "# Patched: DLL build enabled (FATAL_ERROR removed by QuantLib-DLL)`nadd_compile_options(/wd4251)  # Suppress C4251: STL types in DLL-exported class members"
 if ($patched -eq $original) {
     Write-Warning "Platform.cmake patch pattern did not match - file may have changed or already patched"
     Select-String -Path $PlatformCmake -Pattern "FATAL_ERROR|BUILD_SHARED|EXPORT_ALL|Patched" | Write-Host
