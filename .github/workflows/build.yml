@@ -19,6 +19,10 @@ on:
         description: "Build and include QuantLib test suite"
         type: boolean
         default: true
+      run_tests:
+        description: "Run the QuantLib test suite after building"
+        type: boolean
+        default: true
       create_release:
         description: "Create a GitHub Release with the zip asset"
         type: boolean
@@ -43,7 +47,10 @@ jobs:
       - name: Build QuantLib DLL
         shell: pwsh
         run: |
-          $buildTestsFlag = if ("${{ inputs.build_tests }}" -eq "true") { "-BuildTests" } else { "" }
+          $buildTests = "${{ inputs.build_tests }}" -ne "false"
+          $runTests   = "${{ inputs.run_tests }}"   -ne "false"
+          $buildTestsFlag = if ($buildTests) { "-BuildTests" } else { "" }
+          $runTestsFlag   = if ($runTests)   { "-RunTests"   } else { "" }
           $cmd = "scripts/Build-QuantLibDLL.ps1" +
             " -QuantLibVersion $env:QL_VERSION" +
             " -BoostVersion $env:BOOST_VERSION" +
@@ -51,7 +58,7 @@ jobs:
             " -TempDir ${{ runner.temp }}\quantlib-build" +
             " -PackageZip" +
             " -ZipOutputDir ${{ github.workspace }}" +
-            " $buildTestsFlag"
+            " $buildTestsFlag $runTestsFlag"
           Write-Host "Running: $cmd"
           Invoke-Expression $cmd
 
