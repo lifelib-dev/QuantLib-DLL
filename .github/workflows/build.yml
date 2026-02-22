@@ -1,6 +1,10 @@
 name: Build QuantLib DLL
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       quantlib_version:
@@ -14,7 +18,7 @@ on:
       build_tests:
         description: "Build and include QuantLib test suite"
         type: boolean
-        default: true
+        default: false
       create_release:
         description: "Create a GitHub Release with the zip asset"
         type: boolean
