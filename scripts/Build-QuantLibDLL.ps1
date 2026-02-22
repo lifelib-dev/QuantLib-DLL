@@ -8,12 +8,14 @@
     as a zip for distribution.
 
     Upstream QuantLib blocks DLL builds on MSVC with a FATAL_ERROR. This script
-    applies five patches to enable DLL builds:
+    applies seven patches to enable DLL builds:
       1. cmake/Platform.cmake      - Remove FATAL_ERROR blocking DLL builds
       2. ql/CMakeLists.txt          - Add RUNTIME DESTINATION for DLL install
       3. ql/qldefines.hpp.cfg       - Inject QL_EXPORT/QL_IMPORT_ONLY macros
       4. normaldistribution.hpp     - Annotate classes with QL_EXPORT
       5. lineartsrpricer.hpp        - Annotate static const members with QL_EXPORT
+      6. gaussiancopulapolicy.hpp   - Annotate static const members with QL_EXPORT
+      7. primitivepolynomials.hpp   - Annotate extern array with QL_EXPORT
 
 .PARAMETER QuantLibVersion
     QuantLib version to build (default: 1.41).
@@ -193,6 +195,30 @@ $ltContent = $ltContent -replace `
     'QL_EXPORT static const Real defaultLowerBound; QL_EXPORT static const Real defaultUpperBound;'
 [System.IO.File]::WriteAllText($linearTsrHeader, $ltContent)
 
+# --- 3f. gaussiancopulapolicy.hpp: QL_EXPORT on private static const members ---
+Write-Host "==> Patching gaussiancopulapolicy.hpp: QL_EXPORT on static const members"
+$gcpHeader = "$QLSrcDir\ql\experimental\math\gaussiancopulapolicy.hpp"
+$gcpContent = Get-Content $gcpHeader -Raw
+$gcpContent = $gcpContent.Replace(
+    'static const NormalDistribution density_;',
+    'QL_EXPORT static const NormalDistribution density_;')
+$gcpContent = $gcpContent.Replace(
+    'static const CumulativeNormalDistribution cumulative_;',
+    'QL_EXPORT static const CumulativeNormalDistribution cumulative_;')
+[System.IO.File]::WriteAllText($gcpHeader, $gcpContent)
+
+# --- 3g. primitivepolynomials.hpp: QL_EXPORT on extern array ---
+Write-Host "==> Patching primitivepolynomials.hpp: QL_EXPORT on PrimitivePolynomials"
+$ppHeader = "$QLSrcDir\ql\math\randomnumbers\primitivepolynomials.hpp"
+$ppContent = Get-Content $ppHeader -Raw
+if (-not $ppContent.Contains('qldefines.hpp')) {
+    $ppContent = $ppContent -replace '(#define\s+primitivepolynomials_hpp)', "`$1`n`n#include <ql/qldefines.hpp>"
+}
+$ppContent = $ppContent.Replace(
+    'extern const long *const PrimitivePolynomials',
+    'extern QL_EXPORT const long *const PrimitivePolynomials')
+[System.IO.File]::WriteAllText($ppHeader, $ppContent)
+
 # ==========================================================================
 # 4. CMake configure, build, and install
 # ==========================================================================
@@ -227,9 +253,27 @@ if (Test-Path $generatedDefines) {
     Write-Warning "Generated qldefines.hpp not found at ${generatedDefines}"
 }
 
-Write-Host "==> Building QuantLib with $Jobs parallel jobs"
-cmake --build $QLBuildDir --config Release --parallel $Jobs
-if ($LASTEXITCODE -ne 0) { throw "CMake build failed with exit code $LASTEXITCODE" }
+Write-Host "==> Building QuantLib library with $Jobs parallel jobs"
+$libLog = "$QLBuildDir\build-library.log"
+cmake --build $QLBuildDir --config Release --parallel $Jobs --target ql_library 2>&1 |
+    Tee-Object -FilePath $libLog
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n==> BUILD FAILED: ql_library (last 80 lines of output):"
+    Get-Content $libLog -Tail 80 | Write-Host
+    throw "CMake build of ql_library failed with exit code $LASTEXITCODE"
+}
+
+if ($BuildTests) {
+    Write-Host "==> Building QuantLib test suite with $Jobs parallel jobs"
+    $testLog = "$QLBuildDir\build-testsuite.log"
+    cmake --build $QLBuildDir --config Release --parallel $Jobs --target ql_test_suite 2>&1 |
+        Tee-Object -FilePath $testLog
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "`n==> BUILD FAILED: ql_test_suite (last 80 lines of output):"
+        Get-Content $testLog -Tail 80 | Write-Host
+        throw "CMake build of ql_test_suite failed with exit code $LASTEXITCODE"
+    }
+}
 
 Write-Host "==> Installing QuantLib to $InstallDir"
 cmake --install $QLBuildDir --config Release
@@ -271,7 +315,7 @@ if ($PackageZip) {
 
     # Copy test suite executable if built
     if ($BuildTests) {
-        $TestExe = Get-ChildItem -Recurse "$QLBuildDir\test-suite" -Filter "ql_test_suite.exe" |
+        $TestExe = Get-ChildItem -Recurse "$QLBuildDir\test-suite" -Filter "quantlib-test-suite.exe" |
                    Where-Object { $_.Directory.Name -eq "Release" } | Select-Object -First 1
         if ($TestExe) {
             Copy-Item $TestExe.FullName "$StagingDir\QuantLib-$QuantLibVersion\bin\"
