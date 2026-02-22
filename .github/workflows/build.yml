@@ -18,11 +18,11 @@ on:
       build_tests:
         description: "Build and include QuantLib test suite"
         type: boolean
-        default: false
+        default: true
       create_release:
         description: "Create a GitHub Release with the zip asset"
         type: boolean
-        default: true
+        default: false
 
 concurrency:
   group: build-${{ github.ref }}
