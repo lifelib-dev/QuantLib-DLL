@@ -282,6 +282,11 @@ if ($PackageZip) {
     # Copy Boost headers
     Copy-Item -Recurse "$BoostIncludeDir" "$StagingDir\boost_$BoostVersionU"
 
+    # Copy license files
+    $ScriptRoot = Split-Path -Parent $PSScriptRoot   # repo root
+    Copy-Item "$ScriptRoot\LICENSE_QUANTLIB.txt" "$StagingDir\"
+    Copy-Item "$ScriptRoot\LICENSE_BOOST.txt" "$StagingDir\"
+
     # Create zip
     New-Item -ItemType Directory -Path $ZipOutputDir -Force | Out-Null
     $ZipPath = Join-Path (Resolve-Path $ZipOutputDir) $ZipName
