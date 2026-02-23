@@ -222,9 +222,13 @@ $ppContent = Get-Content $ppHeader -Raw
 if (-not $ppContent.Contains('qldefines.hpp')) {
     $ppContent = $ppContent -replace '(#define\s+primitivepolynomials_hpp)', "`$1`n`n#include <ql/qldefines.hpp>"
 }
-$ppContent = $ppContent.Replace(
-    'extern const long *const PrimitivePolynomials',
-    'extern QL_EXPORT const long *const PrimitivePolynomials')
+if (-not $ppContent.Contains('QL_EXPORT')) {
+    # NOTE: The declaration uses multi-line "extern ... 'C' ... const long *const"
+    # so we must match just "const long *const PrimitivePolynomials" (not "extern const ...").
+    $ppContent = $ppContent.Replace(
+        'const long *const PrimitivePolynomials',
+        'QL_EXPORT const long *const PrimitivePolynomials')
+}
 [System.IO.File]::WriteAllText($ppHeader, $ppContent)
 
 # ==========================================================================
