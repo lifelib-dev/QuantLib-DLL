@@ -328,8 +328,14 @@ if ($RunTests) {
     $env:PATH = "$DllDir;$env:PATH"
     Write-Host "  DLL directory added to PATH: $DllDir"
 
+    # Temporarily relax ErrorActionPreference so that stderr output from the
+    # native executable (e.g. Boost.Test banner) does not trigger a
+    # NativeCommandError when combined with 2>&1 and $ErrorActionPreference=Stop.
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     $testOutput = & $TestExePath.FullName 2>&1 | Out-String
     $testExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
     Write-Host $testOutput
 
     if ($testExitCode -ne 0) {
