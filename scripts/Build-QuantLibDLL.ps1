@@ -8,7 +8,7 @@
     as a zip for distribution.
 
     Upstream QuantLib blocks DLL builds on MSVC with a FATAL_ERROR. This script
-    applies seven patches to enable DLL builds:
+    applies patches to enable DLL builds:
       1. cmake/Platform.cmake      - Remove FATAL_ERROR blocking DLL builds
                                        and suppress C4251 warnings
       2. ql/CMakeLists.txt          - Add RUNTIME DESTINATION for DLL install
@@ -17,6 +17,11 @@
       5. lineartsrpricer.hpp        - Annotate static const members with QL_EXPORT
       6. gaussiancopulapolicy.hpp   - Annotate static const members with QL_EXPORT
       7. primitivepolynomials.hpp   - Annotate extern array with QL_EXPORT
+      8. singleton DLL fix          - Create singleton.cpp with explicit template
+                                       instantiations and add extern template
+                                       declarations to each singleton header so
+                                       only one copy of each singleton exists
+                                       across DLL/EXE boundaries
 
 .PARAMETER QuantLibVersion
     QuantLib version to build (default: 1.41).
@@ -207,12 +212,16 @@ $ltContent = $ltContent -replace `
 Write-Host "==> Patching gaussiancopulapolicy.hpp: QL_EXPORT on static const members"
 $gcpHeader = "$QLSrcDir\ql\experimental\math\gaussiancopulapolicy.hpp"
 $gcpContent = Get-Content $gcpHeader -Raw
-$gcpContent = $gcpContent.Replace(
-    'static const NormalDistribution density_;',
-    'QL_EXPORT static const NormalDistribution density_;')
-$gcpContent = $gcpContent.Replace(
-    'static const CumulativeNormalDistribution cumulative_;',
-    'QL_EXPORT static const CumulativeNormalDistribution cumulative_;')
+if (-not $gcpContent.Contains('QL_EXPORT static const NormalDistribution density_')) {
+    $gcpContent = $gcpContent.Replace(
+        'static const NormalDistribution density_;',
+        'QL_EXPORT static const NormalDistribution density_;')
+}
+if (-not $gcpContent.Contains('QL_EXPORT static const CumulativeNormalDistribution cumulative_')) {
+    $gcpContent = $gcpContent.Replace(
+        'static const CumulativeNormalDistribution cumulative_;',
+        'QL_EXPORT static const CumulativeNormalDistribution cumulative_;')
+}
 [System.IO.File]::WriteAllText($gcpHeader, $gcpContent)
 
 # --- 3g. primitivepolynomials.hpp: QL_EXPORT on extern array ---
@@ -230,6 +239,239 @@ if (-not $ppContent.Contains('QL_EXPORT')) {
         'QL_EXPORT const long *const PrimitivePolynomials')
 }
 [System.IO.File]::WriteAllText($ppHeader, $ppContent)
+
+# --- 3h. Singleton DLL fix: explicit instantiations + extern template ------
+#
+# Problem: Singleton<T>::instance() is a template defined entirely in a
+# header.  Both the DLL and any consuming EXE independently instantiate
+# the function-local static, producing two separate singleton objects.
+# Tests that set Settings::instance().evaluationDate() in the EXE have
+# no effect on the DLL's own Settings copy, causing widespread failures.
+#
+# Fix:
+#   (a) Create singleton.cpp with explicit template instantiations
+#       compiled into the DLL (decorated with QL_EXPORT = dllexport).
+#   (b) Add singleton.cpp to the CMake source list.
+#   (c) Add "extern template class Singleton<T>;" to each singleton
+#       header so consumers import the DLL's copy.
+# --------------------------------------------------------------------------
+Write-Host "==> Patch 3h: Singleton DLL fix"
+
+# (a) Create ql/patterns/singleton.cpp ----------------------------------
+$singletonCpp = "$QLSrcDir\ql\patterns\singleton.cpp"
+if (-not (Test-Path $singletonCpp)) {
+    $singletonCppContent = @'
+/* -*- mode: c++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+
+/*
+ This file is part of QuantLib-DLL, a DLL packaging of QuantLib.
+
+ It provides explicit template instantiations for Singleton<T> so that
+ a single copy of each singleton lives inside the DLL.  Without this,
+ both the DLL and any consuming EXE would independently instantiate the
+ function-local static in Singleton<T>::instance(), leading to two
+ separate singleton objects and widespread test failures.
+*/
+
+// Include all headers that define Singleton-derived classes.
+// The order matters: dependencies must come before dependents.
+
+#include <ql/settings.hpp>                                               // Settings
+#include <ql/indexes/indexmanager.hpp>                                    // IndexManager
+#include <ql/patterns/observable.hpp>                                     // ObservableSettings
+#include <ql/currencies/exchangeratemanager.hpp>                          // ExchangeRateManager
+#include <ql/math/randomnumbers/seedgenerator.hpp>                       // SeedGenerator
+#include <ql/cashflows/iborcoupon.hpp>                                    // IborCoupon::Settings
+#include <ql/money.hpp>                                                   // Money::Settings
+#include <ql/patterns/lazyobject.hpp>                                     // LazyObject::Defaults
+#include <ql/utilities/tracing.hpp>                                       // detail::Tracing
+#include <ql/experimental/commodities/commoditysettings.hpp>              // CommoditySettings
+#include <ql/experimental/commodities/unitofmeasureconversionmanager.hpp> // UnitOfMeasureConversionManager
+
+namespace QuantLib {
+
+    // ------------------------------------------------------------------
+    // Explicit template instantiations.
+    //
+    // Because QL_COMPILATION is defined when building this translation
+    // unit, QL_EXPORT resolves to __declspec(dllexport) on MSVC.  That
+    // decoration is applied to the whole class instantiation, which
+    // includes the static local variable inside instance().
+    // ------------------------------------------------------------------
+
+    template class QL_EXPORT Singleton<Settings>;
+    template class QL_EXPORT Singleton<IndexManager>;
+    template class QL_EXPORT Singleton<ObservableSettings>;
+    template class QL_EXPORT Singleton<ExchangeRateManager>;
+    template class QL_EXPORT Singleton<SeedGenerator>;
+    template class QL_EXPORT Singleton<IborCoupon::Settings>;
+    template class QL_EXPORT Singleton<Money::Settings>;
+    template class QL_EXPORT Singleton<LazyObject::Defaults>;
+    template class QL_EXPORT Singleton<detail::Tracing>;
+    template class QL_EXPORT Singleton<CommoditySettings>;
+    template class QL_EXPORT Singleton<UnitOfMeasureConversionManager>;
+
+}
+'@
+    [System.IO.File]::WriteAllText($singletonCpp, $singletonCppContent)
+    Write-Host "==> Created ql/patterns/singleton.cpp"
+} else {
+    Write-Host "==> ql/patterns/singleton.cpp already exists, skipping"
+}
+
+# (b) Add singleton.cpp to ql/CMakeLists.txt source list ----------------
+$qlCmake = "$QLSrcDir\ql\CMakeLists.txt"
+$qlContent = Get-Content $qlCmake -Raw
+if (-not $qlContent.Contains('patterns/singleton.cpp')) {
+    # Insert after the existing patterns/observable.cpp line
+    $qlContent = $qlContent.Replace(
+        'patterns/observable.cpp',
+        "patterns/observable.cpp`n    patterns/singleton.cpp")
+    [System.IO.File]::WriteAllText($qlCmake, $qlContent)
+    Write-Host "==> Added patterns/singleton.cpp to ql/CMakeLists.txt"
+} else {
+    Write-Host "==> patterns/singleton.cpp already in CMakeLists.txt, skipping"
+}
+
+# (c) Add extern template declarations to each singleton header ---------
+# Helper: inserts an extern-template block before the include-guard #endif.
+# The block is wrapped in namespace QuantLib { } because the closing brace
+# of the namespace precedes the #endif in every QuantLib header.
+function Add-ExternTemplateLine {
+    param(
+        [string]$FilePath,
+        [string]$ExternLine,      # e.g. "extern template class Singleton<Settings>;"
+        [string]$GuardMacro       # e.g. "quantlib_settings_hpp"
+    )
+    $content = Get-Content $FilePath -Raw
+    if ($content.Contains('extern template class Singleton<')) {
+        Write-Host "    (already patched)"
+        return
+    }
+    $block = @"
+
+// Prevent duplicate Singleton instantiation across DLL/EXE boundary.
+// The explicit instantiation lives in ql/patterns/singleton.cpp.
+#if defined(_MSC_VER) && !defined(QL_COMPILATION)
+namespace QuantLib {
+$ExternLine
+}
+#endif
+
+"@
+    # Insert before the final include-guard #endif.
+    $guardEndif = "#endif"
+    $lastPos = $content.LastIndexOf($guardEndif)
+    if ($lastPos -ge 0) {
+        $before = $content.Substring(0, $lastPos)
+        $after  = $content.Substring($lastPos)
+        $content = $before + $block + $after
+    }
+    [System.IO.File]::WriteAllText($FilePath, $content)
+}
+
+# --- settings.hpp: Settings ---
+Write-Host "  - settings.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\settings.hpp" `
+    -ExternLine "extern template class Singleton<Settings>;" `
+    -GuardMacro "quantlib_settings_hpp"
+
+# --- indexmanager.hpp: IndexManager ---
+Write-Host "  - indexmanager.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\indexes\indexmanager.hpp" `
+    -ExternLine "extern template class Singleton<IndexManager>;" `
+    -GuardMacro "quantlib_index_manager_hpp"
+
+# --- observable.hpp: ObservableSettings ---
+# This header has TWO #endif at the end: one for
+# QL_ENABLE_THREAD_SAFE_OBSERVER_PATTERN and one for the include guard.
+# We need to insert before the very last #endif (the include guard).
+Write-Host "  - observable.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\patterns\observable.hpp" `
+    -ExternLine "extern template class Singleton<ObservableSettings>;" `
+    -GuardMacro "quantlib_observable_hpp"
+
+# --- exchangeratemanager.hpp: ExchangeRateManager ---
+Write-Host "  - exchangeratemanager.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\currencies\exchangeratemanager.hpp" `
+    -ExternLine "extern template class Singleton<ExchangeRateManager>;" `
+    -GuardMacro "quantlib_exchange_rate_manager_hpp"
+
+# --- seedgenerator.hpp: SeedGenerator ---
+Write-Host "  - seedgenerator.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\math\randomnumbers\seedgenerator.hpp" `
+    -ExternLine "extern template class Singleton<SeedGenerator>;" `
+    -GuardMacro "quantlib_seed_generator_hpp"
+
+# --- iborcoupon.hpp: IborCoupon::Settings ---
+Write-Host "  - iborcoupon.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\cashflows\iborcoupon.hpp" `
+    -ExternLine "extern template class Singleton<IborCoupon::Settings>;" `
+    -GuardMacro "quantlib_ibor_coupon_hpp"
+
+# --- money.hpp: Money::Settings ---
+Write-Host "  - money.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\money.hpp" `
+    -ExternLine "extern template class Singleton<Money::Settings>;" `
+    -GuardMacro "quantlib_money_hpp"
+
+# --- lazyobject.hpp: LazyObject::Defaults ---
+Write-Host "  - lazyobject.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\patterns\lazyobject.hpp" `
+    -ExternLine "extern template class Singleton<LazyObject::Defaults>;" `
+    -GuardMacro "quantlib_lazy_object_h"
+
+# --- tracing.hpp: detail::Tracing ---
+# This header has TWO #endif at the end: one for QL_ENABLE_TRACING
+# and one for the include guard.
+Write-Host "  - tracing.hpp"
+$tracingHeader = "$QLSrcDir\ql\utilities\tracing.hpp"
+$tracingContent = Get-Content $tracingHeader -Raw
+if (-not $tracingContent.Contains('extern template class Singleton<')) {
+    # Tracing is in namespace QuantLib::detail, so we need a qualified extern template.
+    $tracingBlock = @"
+
+// Prevent duplicate Singleton instantiation across DLL/EXE boundary.
+// The explicit instantiation lives in ql/patterns/singleton.cpp.
+#if defined(_MSC_VER) && !defined(QL_COMPILATION)
+namespace QuantLib::detail {
+extern template class Singleton<Tracing>;
+}
+#endif
+
+"@
+    $lastPos = $tracingContent.LastIndexOf('#endif')
+    if ($lastPos -ge 0) {
+        $before = $tracingContent.Substring(0, $lastPos)
+        $after  = $tracingContent.Substring($lastPos)
+        $tracingContent = $before + $tracingBlock + $after
+    }
+    [System.IO.File]::WriteAllText($tracingHeader, $tracingContent)
+}
+
+# --- commoditysettings.hpp: CommoditySettings ---
+Write-Host "  - commoditysettings.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\experimental\commodities\commoditysettings.hpp" `
+    -ExternLine "extern template class Singleton<CommoditySettings>;" `
+    -GuardMacro "quantlib_commodity_settings_hpp"
+
+# --- unitofmeasureconversionmanager.hpp: UnitOfMeasureConversionManager ---
+Write-Host "  - unitofmeasureconversionmanager.hpp"
+Add-ExternTemplateLine `
+    -FilePath "$QLSrcDir\ql\experimental\commodities\unitofmeasureconversionmanager.hpp" `
+    -ExternLine "extern template class Singleton<UnitOfMeasureConversionManager>;" `
+    -GuardMacro "quantlib_unit_of_measure_conversion_manager_hpp"
+
+Write-Host "==> Singleton DLL fix complete"
 
 # ==========================================================================
 # 4. CMake configure, build, and install
