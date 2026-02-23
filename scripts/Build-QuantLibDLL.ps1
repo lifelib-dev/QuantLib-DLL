@@ -247,7 +247,7 @@ $cmakeArgs = @(
     "-DCMAKE_WINDOWS_EXPORT_ALL_SYMBOLS=ON"
     '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL'
     "-DBoost_INCLUDE_DIR=$BoostIncludeDir"
-    "-DQL_BUILD_BENCHMARK=OFF"
+    "-DQL_INSTALL_BENCHMARK=OFF"
     "-DQL_BUILD_EXAMPLES=OFF"
     "-DQL_BUILD_TEST_SUITE=$( if ($BuildTests) { 'ON' } else { 'OFF' } )"
     "-Wno-dev"
