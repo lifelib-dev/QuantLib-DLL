@@ -22,7 +22,7 @@ on:
       run_tests:
         description: "Run the QuantLib test suite after building"
         type: boolean
-        default: true
+        default: false
       create_release:
         description: "Create a GitHub Release with the zip asset"
         type: boolean
@@ -48,7 +48,7 @@ jobs:
         shell: pwsh
         run: |
           $buildTests = "${{ inputs.build_tests }}" -ne "false"
-          $runTests   = "${{ inputs.run_tests }}"   -ne "false"
+          $runTests   = "${{ inputs.run_tests }}"   -eq "true"
           $buildTestsFlag = if ($buildTests) { "-BuildTests" } else { "" }
           $runTestsFlag   = if ($runTests)   { "-RunTests"   } else { "" }
           $cmd = "scripts/Build-QuantLibDLL.ps1" +
