@@ -52,19 +52,30 @@ Include the QuantLib test suite:
 .\scripts\Build-QuantLibDLL.ps1 -BuildTests -PackageZip
 ```
 
+Build and run the test suite:
+
+```powershell
+.\scripts\Build-QuantLibDLL.ps1 -RunTests -PackageZip
+```
+
 ## Patches applied
 
-Five patches are applied to the QuantLib source to enable DLL builds:
+Eight patches are applied to the QuantLib source to enable DLL builds:
 
 | File | Patch |
 |------|-------|
-| `cmake/Platform.cmake` | Remove `FATAL_ERROR` that blocks DLL builds on MSVC |
+| `cmake/Platform.cmake` | Remove `FATAL_ERROR` that blocks DLL builds on MSVC and suppress C4251 warnings |
 | `ql/CMakeLists.txt` | Add `RUNTIME DESTINATION` so `cmake --install` copies the DLL |
 | `ql/qldefines.hpp.cfg` | Inject `QL_EXPORT` / `QL_IMPORT_ONLY` macros for `dllexport`/`dllimport` |
 | `ql/math/distributions/normaldistribution.hpp` | Add `QL_EXPORT` to `InverseCumulativeNormal` and `MoroInverseCumulativeNormal` |
 | `ql/cashflows/lineartsrpricer.hpp` | Add `QL_EXPORT` to `defaultLowerBound` and `defaultUpperBound` static const members |
+| `ql/experimental/math/gaussiancopulapolicy.hpp` | Add `QL_EXPORT` to `density_` and `cumulative_` static const members |
+| `ql/math/randomnumbers/primitivepolynomials.hpp` | Add `QL_EXPORT` to `PrimitivePolynomials` extern array |
+| Singleton DLL fix | Create `ql/patterns/singleton.cpp` with explicit template instantiations and add `extern template` declarations to each singleton header so only one copy of each singleton exists across DLL/EXE boundaries |
 
-The last three patches are needed because `CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS` does not export private static const class data members. Without these patches, consumers get unresolved symbol errors at link time.
+Patches 3–7 are needed because `CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS` does not export private static const class data members or `extern "C"` arrays. Without these patches, consumers get unresolved symbol errors at link time.
+
+The singleton fix (patch 8) solves a separate problem: without it, both the DLL and any consuming EXE independently instantiate `Singleton<T>::instance()`, producing two separate singleton objects. This causes widespread test failures because, for example, `Settings::instance().evaluationDate()` set in the EXE has no effect on the DLL's own copy.
 
 ## Build details
 
