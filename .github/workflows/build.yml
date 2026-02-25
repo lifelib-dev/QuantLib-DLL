@@ -104,11 +104,38 @@ jobs:
       QL_VERSION: ${{ inputs.quantlib_version || '1.41' }}
 
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Move tag to current commit
+        run: |
+          TAG="v${{ env.QL_VERSION }}"
+          git tag -f "$TAG"
+          git push origin "$TAG" --force
+
       - uses: actions/download-artifact@v4
         with:
           name: "QuantLib-${{ env.QL_VERSION }}-x64-dll"
 
-      - name: Create Release
+      - name: Delete existing release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ env.QL_VERSION }}"
+          echo "Checking for existing release with tag $TAG..."
+          RELEASE_ID=$(gh api repos/${{ github.repository }}/releases/tags/$TAG \
+            --jq '.id' 2>/dev/null || true)
+          if [ -n "$RELEASE_ID" ]; then
+            echo "Found release $RELEASE_ID — deleting existing assets..."
+            gh api repos/${{ github.repository }}/releases/$RELEASE_ID/assets \
+              --jq '.[].id' | while read ASSET_ID; do
+                echo "  Deleting asset $ASSET_ID"
+                gh api -X DELETE repos/${{ github.repository }}/releases/assets/$ASSET_ID
+              done
+          else
+            echo "No existing release for $TAG — nothing to clean up."
+          fi
+
+      - name: Create or update release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ env.QL_VERSION }}"
