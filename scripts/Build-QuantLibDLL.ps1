@@ -616,8 +616,11 @@ if ($PackageZip) {
         }
     }
 
-    # Copy Boost headers
-    Copy-Item -Recurse "$BoostIncludeDir" "$StagingDir\boost_$BoostVersionU"
+    # Copy only the boost/ headers subdirectory (not libs/, tools/, doc/, etc.
+    # from the full Boost source distribution)
+    $BoostStagingDir = "$StagingDir\boost_$BoostVersionU"
+    New-Item -ItemType Directory -Path $BoostStagingDir -Force | Out-Null
+    Copy-Item -Recurse "$BoostIncludeDir\boost" "$BoostStagingDir\boost"
 
     # Copy license files
     $ScriptRoot = Split-Path -Parent $PSScriptRoot   # repo root
